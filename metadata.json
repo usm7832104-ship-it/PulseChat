@@ -1,0 +1,6 @@
+{
+  "name": "PulseChat 15",
+  "description": "Exclusive 15-member Material UI messaging workspace with WhatsApp features, voice notes, 24-hour status stories, voice calls, and a 16-theme Admin Command Center.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
