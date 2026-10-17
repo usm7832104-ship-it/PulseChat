@@ -175,13 +175,15 @@ export const StatusCreatorDialog: React.FC<StatusCreatorDialogProps> = ({
                 variant="standard"
                 value={content}
                 onChange={(e) => setContent(e.target.value)}
-                InputProps={{
-                  disableUnderline: true,
-                  style: {
-                    color: '#ffffff',
-                    fontSize: '1.35rem',
-                    fontWeight: 600,
-                    textAlign: 'center',
+                slotProps={{
+                  input: {
+                    disableUnderline: true,
+                    style: {
+                      color: '#ffffff',
+                      fontSize: '1.35rem',
+                      fontWeight: 600,
+                      textAlign: 'center',
+                    },
                   },
                 }}
               />

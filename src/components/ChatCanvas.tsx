@@ -583,7 +583,7 @@ export const ChatCanvas: React.FC<ChatCanvasProps> = ({
             placeholder="Search messages in this chat..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            InputProps={{ disableUnderline: true }}
+            slotProps={{ input: { disableUnderline: true } }}
           />
           {searchQuery && (
             <IconButton size="small" onClick={() => setSearchQuery('')}>

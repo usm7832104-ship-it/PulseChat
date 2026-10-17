@@ -151,83 +151,124 @@ export default function App() {
     fetchBootstrap();
   }, []);
 
-  // Connect WebSocket for Real-Time Synchronization
+  // Connect WebSocket & BroadcastChannel for Real-Time Synchronization (works on both Node server & Vercel static)
   useEffect(() => {
+    const applyStateSync = (payload: any) => {
+      if (!payload) return;
+      setUsers(payload.users || []);
+      setChats(payload.chats || []);
+      setMessages(payload.messages || []);
+      setStatuses(payload.statuses || []);
+      setCalls(payload.calls || []);
+      if (payload.settings) setSettings(payload.settings);
+    };
+
+    const handleRealtimeEvent = (type: string, payload: any) => {
+      if (type === 'state:sync' && payload) {
+        applyStateSync(payload);
+      } else if (type === 'typing:sync' && payload) {
+        setChats((prev) =>
+          prev.map((c) =>
+            c.id === payload.chatId
+              ? { ...c, typingUserIds: payload.typingUserIds }
+              : c
+          )
+        );
+      } else if (type === 'call:invite' && payload) {
+        if (payload.receiverId === currentUserId) {
+          setCallSession({
+            callId: payload.callId,
+            callerId: payload.callerId,
+            receiverId: payload.receiverId,
+            chatId: payload.chatId,
+            direction: 'incoming',
+            state: 'ringing',
+          });
+        }
+      } else if (type === 'call:accept' && payload) {
+        setCallSession((prev) =>
+          prev && prev.callId === payload.callId
+            ? { ...prev, state: 'connected' }
+            : prev
+        );
+      } else if ((type === 'call:decline' || type === 'call:end') && payload) {
+        setCallSession((prev) =>
+          prev && prev.callId === payload.callId ? null : prev
+        );
+      }
+    };
+
+    const onCustomSync = (e: Event) => {
+      const customEvent = e as CustomEvent;
+      if (customEvent.detail) {
+        applyStateSync(customEvent.detail);
+      }
+    };
+    window.addEventListener('pulsechat:state-sync', onCustomSync);
+
+    const channel =
+      typeof BroadcastChannel !== 'undefined'
+        ? new BroadcastChannel('pulsechat_15_realtime_channel')
+        : null;
+    if (channel) {
+      channel.onmessage = (ev) => {
+        if (ev.data?.type) {
+          handleRealtimeEvent(ev.data.type, ev.data.payload);
+        }
+      };
+    }
+
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${window.location.host}/ws`;
     let socket: WebSocket | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let wsSupported = true;
 
     const connect = () => {
-      socket = new WebSocket(wsUrl);
-      wsRef.current = socket;
+      if (!wsSupported) return;
+      try {
+        socket = new WebSocket(wsUrl);
+        wsRef.current = socket;
 
-      socket.onopen = () => {
-        if (currentUserId) {
-          socket?.send(
-            JSON.stringify({
-              type: 'presence:online',
-              payload: { userId: currentUserId },
-            })
-          );
-        }
-      };
-
-      socket.onmessage = (event) => {
-        try {
-          const { type, payload } = JSON.parse(event.data);
-          if (type === 'state:sync' && payload) {
-            setUsers(payload.users || []);
-            setChats(payload.chats || []);
-            setMessages(payload.messages || []);
-            setStatuses(payload.statuses || []);
-            setCalls(payload.calls || []);
-            if (payload.settings) setSettings(payload.settings);
-          } else if (type === 'typing:sync' && payload) {
-            setChats((prev) =>
-              prev.map((c) =>
-                c.id === payload.chatId
-                  ? { ...c, typingUserIds: payload.typingUserIds }
-                  : c
-              )
-            );
-          } else if (type === 'call:invite' && payload) {
-            if (payload.receiverId === currentUserId) {
-              setCallSession({
-                callId: payload.callId,
-                callerId: payload.callerId,
-                receiverId: payload.receiverId,
-                chatId: payload.chatId,
-                direction: 'incoming',
-                state: 'ringing',
-              });
-            }
-          } else if (type === 'call:accept' && payload) {
-            setCallSession((prev) =>
-              prev && prev.callId === payload.callId
-                ? { ...prev, state: 'connected' }
-                : prev
-            );
-          } else if (
-            (type === 'call:decline' || type === 'call:end') &&
-            payload
-          ) {
-            setCallSession((prev) =>
-              prev && prev.callId === payload.callId ? null : prev
+        socket.onopen = () => {
+          if (currentUserId) {
+            socket?.send(
+              JSON.stringify({
+                type: 'presence:online',
+                payload: { userId: currentUserId },
+              })
             );
           }
-        } catch (err) {
-          console.error('WS event error:', err);
-        }
-      };
+        };
 
-      socket.onclose = () => {
-        reconnectTimer = setTimeout(connect, 2500);
-      };
+        socket.onmessage = (event) => {
+          try {
+            const { type, payload } = JSON.parse(event.data);
+            handleRealtimeEvent(type, payload);
+          } catch {
+            // ignore malformed frame
+          }
+        };
+
+        socket.onerror = () => {
+          // On static hosts like Vercel, /ws is not available; rely on BroadcastChannel + UniversalBackend
+          wsSupported = false;
+        };
+
+        socket.onclose = () => {
+          if (wsSupported) {
+            reconnectTimer = setTimeout(connect, 4000);
+          }
+        };
+      } catch {
+        wsSupported = false;
+      }
     };
 
     connect();
     return () => {
+      window.removeEventListener('pulsechat:state-sync', onCustomSync);
+      channel?.close();
       if (reconnectTimer) clearTimeout(reconnectTimer);
       socket?.close();
     };
@@ -898,13 +939,15 @@ export default function App() {
                       placeholder="Search chats or members..."
                       value={sidebarSearch}
                       onChange={(e) => setSidebarSearch(e.target.value)}
-                      InputProps={{
-                        startAdornment: (
-                          <Search
-                            size={16}
-                            style={{ marginRight: 8, opacity: 0.6 }}
-                          />
-                        ),
+                      slotProps={{
+                        input: {
+                          startAdornment: (
+                            <Search
+                              size={16}
+                              style={{ marginRight: 8, opacity: 0.6 }}
+                            />
+                          ),
+                        },
                       }}
                       sx={{ mb: 1.25 }}
                     />
